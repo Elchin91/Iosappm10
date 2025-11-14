@@ -65,35 +65,52 @@ jobs:
           
           echo "🔨 Начинаем сборку приложения..."
           
-          # Используем build вместо archive - это проще и надежнее
-          xcodebuild build \
+          # Пробуем использовать симулятор SDK, так как он точно доступен
+          SIM_SDK=$(xcodebuild -showsdks | grep -o 'iphonesimulator[0-9.]*' | head -n 1 | sed 's/iphonesimulator//' || echo "")
+          if [ -n "$SIM_SDK" ]; then
+            echo "⚠️ iOS SDK не доступен, используем симулятор SDK: iphonesimulator$SIM_SDK"
+            SDK_ARG="-sdk iphonesimulator$SIM_SDK"
+          fi
+          
+          # Используем build без destination - это должно работать
+          echo "Пробуем сборку без destination..."
+          if ! xcodebuild build \
             -workspace ios/M10Wallet.xcworkspace \
             -scheme M10Wallet \
             -configuration Release \
             $SDK_ARG \
-            -destination "generic/platform=iOS" \
             CODE_SIGN_IDENTITY="-" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            CONFIGURATION_BUILD_DIR="${{ github.workspace }}/build" || \
-          xcodebuild build \
-            -workspace ios/M10Wallet.xcworkspace \
-            -scheme M10Wallet \
-            -configuration Release \
-            $SDK_ARG \
-            CODE_SIGN_IDENTITY="-" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            CONFIGURATION_BUILD_DIR="${{ github.workspace }}/build"
+            CONFIGURATION_BUILD_DIR="${{ github.workspace }}/build" \
+            -derivedDataPath "${{ github.workspace }}/build/DerivedData" 2>&1; then
+            echo "⚠️ Первая попытка не удалась, пробуем с симулятором destination..."
+            # Пробуем с симулятором destination
+            xcodebuild build \
+              -workspace ios/M10Wallet.xcworkspace \
+              -scheme M10Wallet \
+              -configuration Release \
+              -sdk iphonesimulator \
+              -destination "generic/platform=iOS Simulator" \
+              CODE_SIGN_IDENTITY="-" \
+              CODE_SIGNING_REQUIRED=NO \
+              CODE_SIGNING_ALLOWED=NO \
+              CONFIGURATION_BUILD_DIR="${{ github.workspace }}/build" \
+              -derivedDataPath "${{ github.workspace }}/build/DerivedData"
+          fi
           
           # Ищем собранный .app файл в разных возможных местах
           APP_PATH=""
           POSSIBLE_PATHS=(
             "${{ github.workspace }}/build/M10Wallet.app"
             "${{ github.workspace }}/build/Release-iphoneos/M10Wallet.app"
+            "${{ github.workspace }}/build/Release-iphonesimulator/M10Wallet.app"
+            "${{ github.workspace }}/build/DerivedData/Build/Products/Release-iphoneos/M10Wallet.app"
+            "${{ github.workspace }}/build/DerivedData/Build/Products/Release-iphonesimulator/M10Wallet.app"
             "ios/build/Release-iphoneos/M10Wallet.app"
+            "ios/build/Release-iphonesimulator/M10Wallet.app"
             "ios/build/Build/Products/Release-iphoneos/M10Wallet.app"
-            "$(xcodebuild -workspace ios/M10Wallet.xcworkspace -scheme M10Wallet -configuration Release -showBuildSettings | grep -m 1 "BUILT_PRODUCTS_DIR" | sed 's/.*= *//')/M10Wallet.app"
+            "ios/build/Build/Products/Release-iphonesimulator/M10Wallet.app"
           )
           
           for path in "${POSSIBLE_PATHS[@]}"; do
