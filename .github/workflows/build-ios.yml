@@ -1,0 +1,89 @@
+name: Build iOS IPA for Trollstore
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'app/**'
+      - 'components/**'
+      - 'ios/**'
+      - 'package.json'
+      - 'app.json'
+      - 'eas.json'
+      - '.github/workflows/build-ios.yml'
+
+jobs:
+  build:
+    name: Build IPA
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build IPA for Trollstore
+        run: eas build --platform ios --profile trollstore --non-interactive --no-wait
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Wait for build to complete
+        run: |
+          BUILD_ID=$(eas build:list --platform ios --limit 1 --json | jq -r '.[0].id')
+          echo "Waiting for build $BUILD_ID to complete..."
+          eas build:wait --id $BUILD_ID --platform ios
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Download IPA
+        run: |
+          BUILD_ID=$(eas build:list --platform ios --limit 1 --json | jq -r '.[0].id')
+          eas build:download --id $BUILD_ID --platform ios --output ./build/M10Wallet.ipa
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: M10Wallet-IPA
+          path: build/M10Wallet.ipa
+          retention-days: 30
+
+      - name: Create Release
+        if: github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v1
+        with:
+          files: build/M10Wallet.ipa
+          tag_name: v${{ github.run_number }}
+          name: Release v${{ github.run_number }}
+          body: |
+            IPA файл для установки через Trollstore
+            
+            ## Инструкция по установке:
+            1. Скачайте файл M10Wallet.ipa
+            2. Откройте Trollstore на вашем устройстве
+            3. Выберите "Install IPA File"
+            4. Выберите скачанный файл
+            5. Дождитесь завершения установки
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
