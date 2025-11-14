@@ -72,14 +72,23 @@ jobs:
         run: |
           mkdir -p ${{ github.workspace }}/build/ipa
           # Пробуем экспорт с ad-hoc
-          xcodebuild -exportArchive \
+          if xcodebuild -exportArchive \
             -archivePath ${{ github.workspace }}/build/M10Wallet.xcarchive \
             -exportPath ${{ github.workspace }}/build/ipa \
             -exportOptionsPlist ${{ github.workspace }}/exportOptions.plist \
-            -allowProvisioningUpdates || \
-          # Если не получилось, пробуем без подписи через альтернативный метод
-          (cd ${{ github.workspace }}/build/M10Wallet.xcarchive/Products/Applications && \
-           zip -r ${{ github.workspace }}/build/ipa/M10Wallet.ipa M10Wallet.app)
+            -allowProvisioningUpdates 2>&1; then
+            echo "✅ IPA экспортирован через xcodebuild"
+          else
+            echo "⚠️ xcodebuild export не удался, создаем IPA вручную..."
+            # Создаем правильную структуру IPA для Trollstore
+            PAYLOAD_DIR="${{ github.workspace }}/build/ipa/Payload"
+            mkdir -p "$PAYLOAD_DIR"
+            cp -r "${{ github.workspace }}/build/M10Wallet.xcarchive/Products/Applications/M10Wallet.app" "$PAYLOAD_DIR/"
+            cd "${{ github.workspace }}/build/ipa"
+            zip -r M10Wallet.ipa Payload
+            rm -rf Payload
+            echo "✅ IPA создан вручную: ${{ github.workspace }}/build/ipa/M10Wallet.ipa"
+          fi
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
