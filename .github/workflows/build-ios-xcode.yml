@@ -46,7 +46,7 @@ jobs:
           echo "=== Available Schemes ==="
           xcodebuild -list -workspace ios/M10Wallet.xcworkspace || xcodebuild -list -project ios/M10Wallet.xcodeproj
 
-      - name: Build Archive
+      - name: Build iOS App
         run: |
           mkdir -p ${{ github.workspace }}/build
           
@@ -63,96 +63,85 @@ jobs:
             SDK_ARG="-sdk iphoneos$IOS_SDK"
           fi
           
-          echo "🔨 Начинаем сборку архива..."
-          echo "Пробуем с destination generic/platform=iOS..."
+          echo "🔨 Начинаем сборку приложения..."
           
-          # Пробуем разные варианты destination
-          ARCHIVE_SUCCESS=false
-          
-          # Вариант 1: с generic/platform=iOS
-          if xcodebuild archive \
+          # Используем build вместо archive - это проще и надежнее
+          xcodebuild build \
             -workspace ios/M10Wallet.xcworkspace \
             -scheme M10Wallet \
             -configuration Release \
             $SDK_ARG \
             -destination "generic/platform=iOS" \
-            -archivePath ${{ github.workspace }}/build/M10Wallet.xcarchive \
             CODE_SIGN_IDENTITY="-" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            PROVISIONING_PROFILE_SPECIFIER="" 2>&1; then
-            ARCHIVE_SUCCESS=true
-            echo "✅ Архив успешно создан (вариант 1)"
-          else
-            echo "⚠️ Вариант 1 не удался, пробуем вариант 2..."
-            
-            # Вариант 2: без destination, но с указанием SDK
-            if xcodebuild archive \
-              -workspace ios/M10Wallet.xcworkspace \
-              -scheme M10Wallet \
-              -configuration Release \
-              $SDK_ARG \
-              -archivePath ${{ github.workspace }}/build/M10Wallet.xcarchive \
-              CODE_SIGN_IDENTITY="-" \
-              CODE_SIGNING_REQUIRED=NO \
-              CODE_SIGNING_ALLOWED=NO 2>&1; then
-              ARCHIVE_SUCCESS=true
-              echo "✅ Архив успешно создан (вариант 2)"
-            else
-              echo "⚠️ Вариант 2 не удался, пробуем вариант 3 (build вместо archive)..."
-              
-              # Вариант 3: используем build вместо archive
-              xcodebuild build \
-                -workspace ios/M10Wallet.xcworkspace \
-                -scheme M10Wallet \
-                -configuration Release \
-                $SDK_ARG \
-                -destination "generic/platform=iOS" \
-                CODE_SIGN_IDENTITY="-" \
-                CODE_SIGNING_REQUIRED=NO \
-                CODE_SIGNING_ALLOWED=NO
-              
-              # Создаем архив вручную из build продукта
-              BUILD_DIR="ios/build/Release-iphoneos"
-              if [ -d "$BUILD_DIR/M10Wallet.app" ]; then
-                mkdir -p ${{ github.workspace }}/build/M10Wallet.xcarchive/Products/Applications
-                cp -r "$BUILD_DIR/M10Wallet.app" ${{ github.workspace }}/build/M10Wallet.xcarchive/Products/Applications/
-                ARCHIVE_SUCCESS=true
-                echo "✅ Архив создан вручную из build продукта"
-              fi
-            fi
-          fi
+            CONFIGURATION_BUILD_DIR="${{ github.workspace }}/build" || \
+          xcodebuild build \
+            -workspace ios/M10Wallet.xcworkspace \
+            -scheme M10Wallet \
+            -configuration Release \
+            $SDK_ARG \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            CONFIGURATION_BUILD_DIR="${{ github.workspace }}/build"
           
-          # Проверяем, что архив создан
-          if [ "$ARCHIVE_SUCCESS" = false ] || [ ! -d "${{ github.workspace }}/build/M10Wallet.xcarchive" ]; then
-            echo "❌ Архив не был создан!"
+          # Ищем собранный .app файл в разных возможных местах
+          APP_PATH=""
+          POSSIBLE_PATHS=(
+            "${{ github.workspace }}/build/M10Wallet.app"
+            "${{ github.workspace }}/build/Release-iphoneos/M10Wallet.app"
+            "ios/build/Release-iphoneos/M10Wallet.app"
+            "ios/build/Build/Products/Release-iphoneos/M10Wallet.app"
+            "$(xcodebuild -workspace ios/M10Wallet.xcworkspace -scheme M10Wallet -configuration Release -showBuildSettings | grep -m 1 "BUILT_PRODUCTS_DIR" | sed 's/.*= *//')/M10Wallet.app"
+          )
+          
+          for path in "${POSSIBLE_PATHS[@]}"; do
+            if [ -d "$path" ]; then
+              APP_PATH="$path"
+              echo "✅ Найден .app файл: $APP_PATH"
+              break
+            fi
+          done
+          
+          if [ -z "$APP_PATH" ]; then
+            echo "❌ .app файл не найден! Ищем вручную..."
+            find . -name "M10Wallet.app" -type d 2>/dev/null | head -5
             echo "Содержимое build директории:"
             ls -la ${{ github.workspace }}/build/ || true
+            ls -la ios/build/ 2>/dev/null || true
             exit 1
           fi
-          echo "✅ Архив найден: ${{ github.workspace }}/build/M10Wallet.xcarchive"
+          
+          # Копируем .app в удобное место для создания IPA
+          mkdir -p ${{ github.workspace }}/build/app
+          cp -r "$APP_PATH" ${{ github.workspace }}/build/app/
+          echo "✅ .app файл подготовлен для создания IPA"
 
-      - name: Export IPA
+      - name: Create IPA
         run: |
           mkdir -p ${{ github.workspace }}/build/ipa
-          # Пробуем экспорт с ad-hoc
-          if xcodebuild -exportArchive \
-            -archivePath ${{ github.workspace }}/build/M10Wallet.xcarchive \
-            -exportPath ${{ github.workspace }}/build/ipa \
-            -exportOptionsPlist ${{ github.workspace }}/exportOptions.plist \
-            -allowProvisioningUpdates 2>&1; then
-            echo "✅ IPA экспортирован через xcodebuild"
-          else
-            echo "⚠️ xcodebuild export не удался, создаем IPA вручную..."
-            # Создаем правильную структуру IPA для Trollstore
-            PAYLOAD_DIR="${{ github.workspace }}/build/ipa/Payload"
-            mkdir -p "$PAYLOAD_DIR"
-            cp -r "${{ github.workspace }}/build/M10Wallet.xcarchive/Products/Applications/M10Wallet.app" "$PAYLOAD_DIR/"
-            cd "${{ github.workspace }}/build/ipa"
-            zip -r M10Wallet.ipa Payload
-            rm -rf Payload
-            echo "✅ IPA создан вручную: ${{ github.workspace }}/build/ipa/M10Wallet.ipa"
+          
+          # Создаем правильную структуру IPA для Trollstore
+          PAYLOAD_DIR="${{ github.workspace }}/build/ipa/Payload"
+          mkdir -p "$PAYLOAD_DIR"
+          
+          # Копируем .app файл в Payload
+          cp -r "${{ github.workspace }}/build/app/M10Wallet.app" "$PAYLOAD_DIR/"
+          
+          # Создаем IPA файл
+          cd "${{ github.workspace }}/build/ipa"
+          zip -r M10Wallet.ipa Payload
+          
+          # Проверяем, что IPA создан
+          if [ ! -f "M10Wallet.ipa" ]; then
+            echo "❌ IPA файл не был создан!"
+            exit 1
           fi
+          
+          echo "✅ IPA создан: ${{ github.workspace }}/build/ipa/M10Wallet.ipa"
+          ls -lh M10Wallet.ipa
+          rm -rf Payload
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
