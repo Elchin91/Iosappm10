@@ -42,35 +42,34 @@ jobs:
         with:
           xcode-version: latest-stable
 
-      - name: List available schemes and destinations
+      - name: List available SDKs
         run: |
+          echo "=== Available SDKs ==="
+          xcodebuild -showsdks
+          echo ""
           echo "=== Available Schemes ==="
           xcodebuild -list -workspace ios/M10Wallet.xcworkspace || xcodebuild -list -project ios/M10Wallet.xcodeproj
-          echo ""
-          echo "=== Available Destinations ==="
-          xcodebuild -showdestinations -workspace ios/M10Wallet.xcworkspace -scheme M10Wallet || true
-
-      - name: Clean build folder
-        run: |
-          mkdir -p ${{ github.workspace }}/build
-          xcodebuild clean \
-            -workspace ios/M10Wallet.xcworkspace \
-            -scheme M10Wallet \
-            -configuration Release \
-            -destination "generic/platform=iOS" || \
-          xcodebuild clean \
-            -workspace ios/M10Wallet.xcworkspace \
-            -scheme M10Wallet \
-            -configuration Release
 
       - name: Build Archive
         run: |
           mkdir -p ${{ github.workspace }}/build
+          # Пробуем найти доступную версию iOS SDK
+          IOS_SDK=$(xcodebuild -showsdks | grep -o 'iphoneos[0-9.]*' | head -n 1 | sed 's/iphoneos//' || echo "")
+          
+          if [ -z "$IOS_SDK" ]; then
+            echo "⚠️ Не найдена версия SDK, используем iphoneos"
+            SDK_ARG="-sdk iphoneos"
+          else
+            echo "✅ Используем SDK: iphoneos$IOS_SDK"
+            SDK_ARG="-sdk iphoneos$IOS_SDK"
+          fi
+          
+          # Собираем архив без clean (clean не обязателен)
           xcodebuild archive \
             -workspace ios/M10Wallet.xcworkspace \
             -scheme M10Wallet \
             -configuration Release \
-            -destination "generic/platform=iOS" \
+            $SDK_ARG \
             -archivePath ${{ github.workspace }}/build/M10Wallet.xcarchive \
             CODE_SIGN_IDENTITY="-" \
             CODE_SIGNING_REQUIRED=NO \
@@ -80,7 +79,15 @@ jobs:
             -workspace ios/M10Wallet.xcworkspace \
             -scheme M10Wallet \
             -configuration Release \
-            -destination "generic/platform=iOS" \
+            -sdk iphoneos \
+            -archivePath ${{ github.workspace }}/build/M10Wallet.xcarchive \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO || \
+          xcodebuild archive \
+            -workspace ios/M10Wallet.xcworkspace \
+            -scheme M10Wallet \
+            -configuration Release \
             -archivePath ${{ github.workspace }}/build/M10Wallet.xcarchive
 
       - name: Export IPA
