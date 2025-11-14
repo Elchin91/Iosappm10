@@ -65,16 +65,9 @@ jobs:
           
           echo "🔨 Начинаем сборку приложения..."
           
-          # Пробуем использовать симулятор SDK, так как он точно доступен
-          SIM_SDK=$(xcodebuild -showsdks | grep -o 'iphonesimulator[0-9.]*' | head -n 1 | sed 's/iphonesimulator//' || echo "")
-          if [ -n "$SIM_SDK" ]; then
-            echo "⚠️ iOS SDK не доступен, используем симулятор SDK: iphonesimulator$SIM_SDK"
-            SDK_ARG="-sdk iphonesimulator$SIM_SDK"
-          fi
-          
-          # Используем build без destination - это должно работать
-          echo "Пробуем сборку без destination..."
-          if ! xcodebuild build \
+          # Используем build без destination - это должно работать с Xcode 15.0
+          echo "Пробуем сборку для реального устройства (без destination)..."
+          xcodebuild build \
             -workspace ios/M10Wallet.xcworkspace \
             -scheme M10Wallet \
             -configuration Release \
@@ -83,21 +76,17 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
             CONFIGURATION_BUILD_DIR="${{ github.workspace }}/build" \
-            -derivedDataPath "${{ github.workspace }}/build/DerivedData" 2>&1; then
-            echo "⚠️ Первая попытка не удалась, пробуем с симулятором destination..."
-            # Пробуем с симулятором destination
-            xcodebuild build \
-              -workspace ios/M10Wallet.xcworkspace \
-              -scheme M10Wallet \
-              -configuration Release \
-              -sdk iphonesimulator \
-              -destination "generic/platform=iOS Simulator" \
-              CODE_SIGN_IDENTITY="-" \
-              CODE_SIGNING_REQUIRED=NO \
-              CODE_SIGNING_ALLOWED=NO \
-              CONFIGURATION_BUILD_DIR="${{ github.workspace }}/build" \
-              -derivedDataPath "${{ github.workspace }}/build/DerivedData"
-          fi
+            -derivedDataPath "${{ github.workspace }}/build/DerivedData" || \
+          xcodebuild build \
+            -workspace ios/M10Wallet.xcworkspace \
+            -scheme M10Wallet \
+            -configuration Release \
+            -sdk iphoneos \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            CONFIGURATION_BUILD_DIR="${{ github.workspace }}/build" \
+            -derivedDataPath "${{ github.workspace }}/build/DerivedData"
           
           # Ищем собранный .app файл в разных возможных местах
           APP_PATH=""
